@@ -167,7 +167,7 @@ RSpec.describe "bundle show", :bundler => "< 3" do
       gem "foo"
     G
 
-    bundle "config auto_install 1"
+    bundle "config set auto_install 1"
     bundle :show
     expect(out).to include("Installing foo 1.0")
   end
