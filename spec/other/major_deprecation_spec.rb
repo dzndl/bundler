@@ -2,7 +2,6 @@
 
 RSpec.describe "major deprecations", :bundler => "< 2" do
   let(:warnings) { last_command.bundler_err } # change to err in 2.0
-  let(:warnings_without_version_messages) { warnings.gsub(/#{Spec::Matchers::MAJOR_DEPRECATION}Bundler will only support ruby(gems)? >= .*/, "") }
 
   before do
     create_file "gems.rb", <<-G
@@ -32,38 +31,10 @@ RSpec.describe "major deprecations", :bundler => "< 2" do
       end
     end
 
-    shared_examples_for "environmental deprecations" do |trigger|
-      describe "ruby version", :ruby => "< 2.0" do
-        it "requires a newer ruby version" do
-          instance_eval(&trigger)
-          expect(warnings).to have_major_deprecation "Bundler will only support ruby >= 2.0, you are running #{RUBY_VERSION}"
-        end
-      end
-
-      describe "rubygems version", :rubygems => "< 2.0" do
-        it "requires a newer rubygems version" do
-          instance_eval(&trigger)
-          expect(warnings).to have_major_deprecation "Bundler will only support rubygems >= 2.0, you are running #{Gem::VERSION}"
-        end
-      end
-    end
-
-    describe "-rbundler/setup" do
-      it_behaves_like "environmental deprecations", proc { ruby "require 'bundler/setup'" }
-    end
-
-    describe "Bundler.setup" do
-      it_behaves_like "environmental deprecations", proc { ruby "require 'bundler'; Bundler.setup" }
-    end
-
-    describe "bundle check" do
-      it_behaves_like "environmental deprecations", proc { bundle :check }
-    end
-
     describe "bundle update --quiet" do
       it "does not print any deprecations" do
         bundle :update, :quiet => true
-        expect(warnings_without_version_messages).not_to have_major_deprecation
+        expect(warnings).not_to have_major_deprecation
       end
     end
 
@@ -80,7 +51,7 @@ RSpec.describe "major deprecations", :bundler => "< 2" do
 
       it "does not warn when --all is passed" do
         bundle! "update --all"
-        expect(warnings_without_version_messages).not_to have_major_deprecation
+        expect(warnings).not_to have_major_deprecation
       end
     end
 
@@ -104,7 +75,7 @@ RSpec.describe "major deprecations", :bundler => "< 2" do
       G
 
       bundle :install
-      expect(warnings_without_version_messages).not_to have_major_deprecation
+      expect(warnings).not_to have_major_deprecation
     end
 
     it "should print a Gemfile deprecation warning" do
@@ -150,7 +121,7 @@ RSpec.describe "major deprecations", :bundler => "< 2" do
         Bundler.setup
       RUBY
 
-      expect(warnings_without_version_messages).to have_major_deprecation("gems.rb and gems.locked will be preferred to Gemfile and Gemfile.lock.")
+      expect(warnings).to have_major_deprecation("gems.rb and gems.locked will be preferred to Gemfile and Gemfile.lock.")
     end
   end
 
