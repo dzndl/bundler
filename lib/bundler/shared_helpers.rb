@@ -164,9 +164,8 @@ module Bundler
           "gems.rb and gems.locked will be preferred to Gemfile and Gemfile.lock."
       end
 
-      if RUBY_VERSION < "2"
-        major_deprecation(2, "Bundler will only support ruby >= 2.0, you are running #{RUBY_VERSION}")
-      end
+      return unless RUBY_VERSION < "2"
+      major_deprecation(2, "Bundler will only support ruby >= 2.0, you are running #{RUBY_VERSION}")
     end
 
     def trap(signal, override = false, &block)
