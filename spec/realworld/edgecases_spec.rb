@@ -30,18 +30,6 @@ RSpec.describe "real world edgecases", :realworld => true, :sometimes => true do
     expect(exitstatus).to eq(0) if exitstatus
   end
 
-  # https://github.com/bundler/bundler/issues/1202
-  it "bundle cache works with rubygems 1.3.7 and pre gems",
-    :ruby => "~> 1.8.7", :rubygems => "~> 1.3.7" do
-    install_gemfile <<-G
-      source "https://rubygems.org"
-      gem "rack",          "1.3.0.beta2"
-      gem "will_paginate", "3.0.pre2"
-    G
-    bundle :cache
-    expect(out).not_to include("Removing outdated .gem files from vendor/cache")
-  end
-
   # https://github.com/bundler/bundler/issues/1486
   # this is a hash collision that only manifests on 1.8.7
   it "finds the correct child versions", :ruby => "~> 1.8.7" do
