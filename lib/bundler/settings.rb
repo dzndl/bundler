@@ -42,7 +42,6 @@ module Bundler
       list_command
       lockfile_upgrade_warning
       lockfile_uses_separate_rubygems_sources
-      major_deprecations
       no_install
       no_prune
       only_update_to_newer_versions
@@ -53,6 +52,7 @@ module Bundler
       prefer_patch
       print_only_version_number
       setup_makes_kernel_gem_public
+      silence_deprecations
       silence_root_warning
       skip_default_git_sources
       specific_platform
@@ -77,6 +77,7 @@ module Bundler
     ].freeze
 
     DEFAULT_CONFIG = {
+      :silence_deprecations => false,
       :disable_version_check => true,
       :prefer_patch => false,
       :redirect => 5,
