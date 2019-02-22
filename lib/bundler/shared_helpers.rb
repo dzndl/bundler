@@ -167,8 +167,6 @@ module Bundler
       if RUBY_VERSION < "2"
         major_deprecation(2, "Bundler will only support ruby >= 2.0, you are running #{RUBY_VERSION}")
       end
-      return if Bundler.rubygems.provides?(">= 2")
-      major_deprecation(2, "Bundler will only support rubygems >= 2.0, you are running #{Bundler.rubygems.version}")
     end
 
     def trap(signal, override = false, &block)

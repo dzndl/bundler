@@ -2,7 +2,7 @@
 
 RSpec.describe "major deprecations", :bundler => "< 2" do
   let(:warnings) { last_command.bundler_err } # change to err in 2.0
-  let(:warnings_without_version_messages) { warnings.gsub(/#{Spec::Matchers::MAJOR_DEPRECATION}Bundler will only support ruby(gems)? >= .*/, "") }
+  let(:warnings_without_version_messages) { warnings.gsub(/#{Spec::Matchers::MAJOR_DEPRECATION}Bundler will only support ruby >= .*/, "") }
 
   before do
     create_file "gems.rb", <<-G
@@ -37,13 +37,6 @@ RSpec.describe "major deprecations", :bundler => "< 2" do
         it "requires a newer ruby version" do
           instance_eval(&trigger)
           expect(warnings).to have_major_deprecation "Bundler will only support ruby >= 2.0, you are running #{RUBY_VERSION}"
-        end
-      end
-
-      describe "rubygems version", :rubygems => "< 2.0" do
-        it "requires a newer rubygems version" do
-          instance_eval(&trigger)
-          expect(warnings).to have_major_deprecation "Bundler will only support rubygems >= 2.0, you are running #{Gem::VERSION}"
         end
       end
     end
