@@ -7,6 +7,8 @@ require "cgi"
 RSpec.describe Bundler, "friendly errors" do
   context "with invalid YAML in .gemrc" do
     before do
+      Gem.configuration = nil
+
       File.open(Gem.configuration.config_file_name, "w") do |f|
         f.write "invalid: yaml: hah"
       end
@@ -14,6 +16,8 @@ RSpec.describe Bundler, "friendly errors" do
 
     after do
       FileUtils.rm(Gem.configuration.config_file_name)
+
+      Gem.configuration = nil
     end
 
     it "reports a relevant friendly error message", :ruby => ">= 1.9", :rubygems => "< 2.5.0" do
