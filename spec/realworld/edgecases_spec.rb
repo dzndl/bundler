@@ -3,19 +3,21 @@
 RSpec.describe "real world edgecases", :realworld => true, :sometimes => true do
   def rubygems_version(name, requirement)
     ruby! <<-RUBY
-      require #{File.expand_path("../../support/artifice/vcr.rb", __FILE__).dump}
-      require "bundler"
-      require "bundler/source/rubygems/remote"
-      require "bundler/fetcher"
-      source = Bundler::Source::Rubygems::Remote.new(URI("https://rubygems.org"))
-      fetcher = Bundler::Fetcher.new(source)
-      index = fetcher.specs([#{name.dump}], nil)
-      rubygem = index.search(Gem::Dependency.new(#{name.dump}, #{requirement.dump})).last
+      require "#{spec_dir}/support/artifice/vcr"
+      require "#{lib_dir}/bundler"
+      require "#{lib_dir}/bundler/source/rubygems/remote"
+      require "#{lib_dir}/bundler/fetcher"
+      rubygem = Bundler.ui.silence do
+        source = Bundler::Source::Rubygems::Remote.new(Bundler::URI("https://rubygems.org"))
+        fetcher = Bundler::Fetcher.new(source)
+        index = fetcher.specs([#{name.dump}], nil)
+        index.search(Gem::Dependency.new(#{name.dump}, #{requirement.dump})).last
+      end
       if rubygem.nil?
         raise "Could not find #{name} (#{requirement}) on rubygems.org!\n" \
           "Found specs:\n\#{index.send(:specs).inspect}"
       end
-      "#{name} (\#{rubygem.version})"
+      puts "#{name} (\#{rubygem.version})"
     RUBY
   end
 
@@ -60,7 +62,7 @@ RSpec.describe "real world edgecases", :realworld => true, :sometimes => true do
   end
 
   it "is able to update a top-level dependency when there is a conflict on a shared transitive child" do
-    # from https://github.com/bundler/bundler/issues/5031
+    # from https://github.com/rubygems/bundler/issues/5031
 
     gemfile <<-G
       source "https://rubygems.org"
@@ -192,7 +194,7 @@ RSpec.describe "real world edgecases", :realworld => true, :sometimes => true do
     expect(lockfile).to include(rubygems_version("paperclip", "~> 5.1.0"))
   end
 
-  # https://github.com/bundler/bundler/issues/1500
+  # https://github.com/rubygems/bundler/issues/1500
   it "does not fail install because of gem plugins" do
     realworld_system_gems("open_gem --version 1.4.2", "rake --version 0.9.2")
     gemfile <<-G

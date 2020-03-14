@@ -298,7 +298,7 @@ G
         #{ruby_version_correct}
       G
 
-      expect(bundled_app("Gemfile.lock")).to exist
+      expect(bundled_app_lock).to exist
     end
 
     it "installs fine with any engine" do
@@ -310,7 +310,7 @@ G
           #{ruby_version_correct_engineless}
         G
 
-        expect(bundled_app("Gemfile.lock")).to exist
+        expect(bundled_app_lock).to exist
       end
     end
 
@@ -322,7 +322,7 @@ G
         #{ruby_version_correct_patchlevel}
       G
 
-      expect(bundled_app("Gemfile.lock")).to exist
+      expect(bundled_app_lock).to exist
     end
 
     it "doesn't install when the ruby version doesn't match" do
@@ -333,7 +333,7 @@ G
         #{ruby_version_incorrect}
       G
 
-      expect(bundled_app("Gemfile.lock")).not_to exist
+      expect(bundled_app_lock).not_to exist
       should_be_ruby_version_incorrect
     end
 
@@ -345,7 +345,7 @@ G
         #{engine_incorrect}
       G
 
-      expect(bundled_app("Gemfile.lock")).not_to exist
+      expect(bundled_app_lock).not_to exist
       should_be_engine_incorrect
     end
 
@@ -358,7 +358,7 @@ G
           #{engine_version_incorrect}
         G
 
-        expect(bundled_app("Gemfile.lock")).not_to exist
+        expect(bundled_app_lock).not_to exist
         should_be_engine_version_incorrect
       end
     end
@@ -371,7 +371,7 @@ G
         #{patchlevel_incorrect}
       G
 
-      expect(bundled_app("Gemfile.lock")).not_to exist
+      expect(bundled_app_lock).not_to exist
       should_be_patchlevel_incorrect
     end
   end
@@ -781,7 +781,7 @@ G
         #{ruby_version_correct}
       G
 
-      bundle :pack
+      bundle :cache
       expect(bundled_app("vendor/cache/rack-1.0.0.gem")).to exist
     end
 
@@ -794,7 +794,7 @@ G
           #{ruby_version_correct_engineless}
         G
 
-        bundle :pack
+        bundle :cache
         expect(bundled_app("vendor/cache/rack-1.0.0.gem")).to exist
       end
     end
@@ -806,7 +806,7 @@ G
         #{ruby_version_incorrect}
       G
 
-      bundle :pack
+      bundle :cache
       should_be_ruby_version_incorrect
     end
 
@@ -817,7 +817,7 @@ G
         #{engine_incorrect}
       G
 
-      bundle :pack
+      bundle :cache
       should_be_engine_incorrect
     end
 
@@ -829,7 +829,7 @@ G
           #{engine_version_incorrect}
         G
 
-        bundle :pack
+        bundle :cache
         should_be_engine_version_incorrect
       end
     end
@@ -842,7 +842,7 @@ G
         #{patchlevel_incorrect}
       G
 
-      bundle :pack
+      bundle :cache
       should_be_patchlevel_incorrect
     end
   end
@@ -936,7 +936,7 @@ G
       G
     end
 
-    it "starts IRB with the default group loaded when ruby version matches" do
+    it "starts IRB with the default group loaded when ruby version matches", :readline do
       gemfile <<-G
         source "#{file_uri_for(gem_repo1)}"
         gem "rack"
@@ -953,7 +953,7 @@ G
       expect(out).to include("0.9.1")
     end
 
-    it "starts IRB with the default group loaded when ruby version matches any engine" do
+    it "starts IRB with the default group loaded when ruby version matches any engine", :readline do
       simulate_ruby_engine "jruby" do
         gemfile <<-G
           source "#{file_uri_for(gem_repo1)}"
@@ -1051,10 +1051,10 @@ G
         #{ruby_version_correct}
       G
 
-      FileUtils.rm(bundled_app("Gemfile.lock"))
+      FileUtils.rm(bundled_app_lock)
 
       run "1"
-      expect(bundled_app("Gemfile.lock")).to exist
+      expect(bundled_app_lock).to exist
     end
 
     it "makes a Gemfile.lock if setup succeeds for any engine" do
@@ -1067,10 +1067,10 @@ G
           #{ruby_version_correct_engineless}
         G
 
-        FileUtils.rm(bundled_app("Gemfile.lock"))
+        FileUtils.rm(bundled_app_lock)
 
         run "1"
-        expect(bundled_app("Gemfile.lock")).to exist
+        expect(bundled_app_lock).to exist
       end
     end
 
@@ -1083,14 +1083,13 @@ G
         #{ruby_version_incorrect}
       G
 
-      FileUtils.rm(bundled_app("Gemfile.lock"))
+      FileUtils.rm(bundled_app_lock)
 
       ruby <<-R
-        require 'rubygems'
         require 'bundler/setup'
       R
 
-      expect(bundled_app("Gemfile.lock")).not_to exist
+      expect(bundled_app_lock).not_to exist
       should_be_ruby_version_incorrect
     end
 
@@ -1103,14 +1102,13 @@ G
         #{engine_incorrect}
       G
 
-      FileUtils.rm(bundled_app("Gemfile.lock"))
+      FileUtils.rm(bundled_app_lock)
 
       ruby <<-R
-        require 'rubygems'
         require 'bundler/setup'
       R
 
-      expect(bundled_app("Gemfile.lock")).not_to exist
+      expect(bundled_app_lock).not_to exist
       should_be_engine_incorrect
     end
 
@@ -1124,14 +1122,13 @@ G
           #{engine_version_incorrect}
         G
 
-        FileUtils.rm(bundled_app("Gemfile.lock"))
+        FileUtils.rm(bundled_app_lock)
 
         ruby <<-R
-          require 'rubygems'
           require 'bundler/setup'
         R
 
-        expect(bundled_app("Gemfile.lock")).not_to exist
+        expect(bundled_app_lock).not_to exist
         should_be_engine_version_incorrect
       end
     end
@@ -1145,14 +1142,13 @@ G
         #{patchlevel_incorrect}
       G
 
-      FileUtils.rm(bundled_app("Gemfile.lock"))
+      FileUtils.rm(bundled_app_lock)
 
       ruby <<-R
-        require 'rubygems'
         require 'bundler/setup'
       R
 
-      expect(bundled_app("Gemfile.lock")).not_to exist
+      expect(bundled_app_lock).not_to exist
       should_be_patchlevel_incorrect
     end
   end
@@ -1185,8 +1181,14 @@ G
       G
 
       bundle "outdated"
-      expect(out).to include("activesupport (newest 3.0, installed 2.3.5, requested = 2.3.5")
-      expect(out).to include("foo (newest 1.0")
+
+      expected_output = <<~TABLE.gsub("x", "\\\h").tr(".", "\.").strip
+        Gem            Current      Latest       Requested  Groups
+        activesupport  2.3.5        3.0          = 2.3.5    default
+        foo            1.0 xxxxxxx  1.0 xxxxxxx  >= 0       default
+      TABLE
+
+      expect(out).to match(Regexp.new(expected_output))
     end
 
     it "returns list of outdated gems when the ruby version matches for any engine" do
@@ -1206,8 +1208,14 @@ G
         G
 
         bundle "outdated"
-        expect(out).to include("activesupport (newest 3.0, installed 2.3.5, requested = 2.3.5)")
-        expect(out).to include("foo (newest 1.0")
+
+        expected_output = <<~TABLE.gsub("x", "\\\h").tr(".", "\.").strip
+          Gem            Current      Latest       Requested  Groups
+          activesupport  2.3.5        3.0          = 2.3.5    default
+          foo            1.0 xxxxxxx  1.0 xxxxxxx  >= 0       default
+        TABLE
+
+        expect(out).to match(Regexp.new(expected_output))
       end
     end
 

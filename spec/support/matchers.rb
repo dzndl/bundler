@@ -1,7 +1,8 @@
 # frozen_string_literal: true
 
 require "forwardable"
-require "support/the_bundle"
+require_relative "the_bundle"
+
 module Spec
   module Matchers
     extend RSpec::Matchers
@@ -127,9 +128,10 @@ module Spec
         groups << opts
         @errors = names.map do |name|
           name, version, platform = name.split(/\s+/)
+          require_path = name == "bundler" ? "#{lib_dir}/bundler" : name.tr("-", "/")
           version_const = name == "bundler" ? "Bundler::VERSION" : Spec::Builders.constantize(name)
           begin
-            run! "require '#{name}.rb'; puts #{version_const}", *groups
+            run! "require '#{require_path}.rb'; puts #{version_const}", *groups
           rescue StandardError => e
             next "#{name} is not installed:\n#{indent(e)}"
           end
@@ -143,7 +145,7 @@ module Spec
           next unless source
           begin
             source_const = "#{Spec::Builders.constantize(name)}_SOURCE"
-            run! "require '#{name}/source'; puts #{source_const}", *groups
+            run! "require '#{require_path}/source'; puts #{source_const}", *groups
           rescue StandardError
             next "#{name} does not have a source defined:\n#{indent(e)}"
           end
@@ -170,7 +172,7 @@ module Spec
               end
             R
           rescue StandardError => e
-            next "checking for #{name} failed:\n#{e}"
+            next "checking for #{name} failed:\n#{e}\n#{e.backtrace.join("\n")}"
           end
           next if out == "WIN"
           next "expected #{name} to not be installed, but it was" if version.nil?
@@ -212,11 +214,11 @@ module Spec
     end
 
     def lockfile_should_be(expected)
-      expect(bundled_app("Gemfile.lock")).to have_lockfile(expected)
+      expect(bundled_app_lock).to have_lockfile(expected)
     end
 
     def gemfile_should_be(expected)
-      expect(bundled_app("Gemfile")).to read_as(strip_whitespace(expected))
+      expect(bundled_app_gemfile).to read_as(strip_whitespace(expected))
     end
   end
 end

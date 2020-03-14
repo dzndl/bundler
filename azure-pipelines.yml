@@ -1,7 +1,0 @@
-jobs:
-- job: Windows
-  pool:
-    vmImage: 'vs2017-win2016'
-  steps:
-  - template: .azure-pipelines/steps.yml
-  timeoutInMinutes: 0

@@ -13,16 +13,59 @@ module Spec
       @gemspec ||= root.join(ruby_core? ? "lib/bundler/bundler.gemspec" : "bundler.gemspec")
     end
 
+    def gemspec_dir
+      @gemspec_dir ||= gemspec.parent
+    end
+
     def bindir
       @bindir ||= root.join(ruby_core? ? "libexec" : "exe")
+    end
+
+    def gem_cmd
+      @gem_cmd ||= ruby_core? ? root.join("bin/gem") : "gem"
+    end
+
+    def gem_bin
+      @gem_bin ||= ruby_core? ? ENV["GEM_COMMAND"] : "gem"
     end
 
     def spec_dir
       @spec_dir ||= root.join(ruby_core? ? "spec/bundler" : "spec")
     end
 
+    def tracked_files
+      skip "not in git working directory" unless git_root_dir?
+
+      @tracked_files ||= ruby_core? ? `git ls-files -z -- lib/bundler lib/bundler.rb spec/bundler man/bundler*` : `git ls-files -z`
+    end
+
+    def shipped_files
+      skip "not in git working directory" unless git_root_dir?
+
+      @shipped_files ||= ruby_core? ? `git ls-files -z -- lib/bundler lib/bundler.rb man/bundler* libexec/bundle*` : `git ls-files -z -- lib man exe CHANGELOG.md LICENSE.md README.md bundler.gemspec`
+    end
+
+    def lib_tracked_files
+      skip "not in git working directory" unless git_root_dir?
+
+      @lib_tracked_files ||= ruby_core? ? sys_exec("git ls-files -z -- lib/bundler lib/bundler.rb", :dir => root) : sys_exec("git ls-files -z -- lib", :dir => root)
+    end
+
+    def man_tracked_files
+      skip "not in git working directory" unless git_root_dir?
+
+      @man_tracked_files ||= sys_exec("git ls-files -z -- man", :dir => root)
+    end
+
     def tmp(*path)
-      root.join("tmp", *path)
+      root.join("tmp", scope, *path)
+    end
+
+    def scope
+      test_number = ENV["TEST_ENV_NUMBER"]
+      return "1" if test_number.nil?
+
+      test_number.empty? ? "1" : test_number
     end
 
     def home(*path)
@@ -43,8 +86,6 @@ module Spec
       root.join(*path)
     end
 
-    alias_method :bundled_app1, :bundled_app
-
     def bundled_app2(*path)
       root = tmp.join("bundled_app2")
       FileUtils.mkdir_p(root)
@@ -59,6 +100,14 @@ module Spec
       bundled_app("vendor/cache/#{path}.gem")
     end
 
+    def bundled_app_gemfile
+      bundled_app("Gemfile")
+    end
+
+    def bundled_app_lock
+      bundled_app("Gemfile.lock")
+    end
+
     def base_system_gems
       tmp.join("gems/base")
     end
@@ -66,8 +115,6 @@ module Spec
     def file_uri_for(path)
       protocol = "file://"
       root = Gem.win_platform? ? "/" : ""
-
-      return protocol + "localhost" + root + path.to_s if RUBY_VERSION < "2.5"
 
       protocol + root + path.to_s
     end
@@ -100,15 +147,11 @@ module Spec
       tmp("gems/system", *path)
     end
 
-    def system_bundle_bin_path
-      system_gem_path("bin/bundle")
-    end
-
     def lib_path(*args)
       tmp("libs", *args)
     end
 
-    def bundler_path
+    def lib_dir
       root.join("lib")
     end
 
@@ -124,17 +167,37 @@ module Spec
       tmp "tmpdir", *args
     end
 
+    def with_root_gemspec
+      if ruby_core?
+        root_gemspec = root.join("bundler.gemspec")
+        # Dir.chdir for Dir.glob in gemspec
+        spec = Dir.chdir(root) { Gem::Specification.load(gemspec.to_s) }
+        spec.bindir = "libexec"
+        File.open(root_gemspec.to_s, "w") {|f| f.write spec.to_ruby }
+        yield(root_gemspec)
+        FileUtils.rm(root_gemspec)
+      else
+        yield(gemspec)
+      end
+    end
+
     def ruby_core?
-      # avoid to wornings
+      # avoid to warnings
       @ruby_core ||= nil
 
       if @ruby_core.nil?
-        @ruby_core = true & (ENV["BUNDLE_RUBY"] && ENV["BUNDLE_GEM"])
+        @ruby_core = true & ENV["GEM_COMMAND"]
       else
         @ruby_core
       end
     end
 
     extend self
+
+  private
+
+    def git_root_dir?
+      root.to_s == `git rev-parse --show-toplevel`.chomp
+    end
   end
 end

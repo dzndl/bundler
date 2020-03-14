@@ -39,27 +39,33 @@ When we cherry-pick, we cherry-pick the merge commits using the following comman
 $ git cherry-pick -m 1 MERGE_COMMIT_SHAS
 ```
 
-For example, for PR [#5029](https://github.com/bundler/bundler/pull/5029), we
-cherry picked commit [dd6aef9](https://github.com/bundler/bundler/commit/dd6aef97a5f2e7173f406267256a8c319d6134ab),
-not [4fe9291](https://github.com/bundler/bundler/commit/4fe92919f51e3463f0aad6fa833ab68044311f03)
+For example, for PR [#5029](https://github.com/rubygems/bundler/pull/5029), we
+cherry picked commit [dd6aef9](https://github.com/rubygems/bundler/commit/dd6aef97a5f2e7173f406267256a8c319d6134ab),
+not [4fe9291](https://github.com/rubygems/bundler/commit/4fe92919f51e3463f0aad6fa833ab68044311f03)
 using:
 
 ```bash
 $ git cherry-pick -m 1 dd6aef9
 ```
 
-The `rake release:patch` command will automatically handle cherry-picking, and is further detailed below.
+The `rake release:prepare_patch` command will automatically handle
+cherry-picking, and is further detailed below.
 
 ## Changelog
 
 Bundler maintains a list of changes present in each version in the `CHANGELOG.md` file.
 Entries should not be added in pull requests, but are rather written by the Bundler
-maintainers in the [bundler-changelog repo](https://github.com/bundler/bundler-changelog).
-That repository tracks changes by pull requests, with each entry having an associated version,
-PR, section, author(s), issue(s) closed, and message.
+maintainers before the release.
 
-Ensure that repo has been updated with all new PRs before releasing a new version,
-and copy over the new sections to the `CHANGELOG.md` in the Bundler repo.
+To fill in the changelog, maintainers can go through the relevant PRs using the
+`rake release:open_unreleased_prs` and manually add a changelog entry for each
+PR that it's about to be released.
+
+If you're releasing a patch level version, you can use `rake
+release:open_unreleased_prs` to instead label each relevant PR with the proper
+milestone of the version to be release. Then the `rake release:patch` task will
+go _only_ through those PRs, and prompt you to add a changelog entry for each of
+them.
 
 ## Releases
 
@@ -79,8 +85,7 @@ Here's the checklist for releasing new minor versions:
 * [ ] Create a new stable branch from master (see **Branching** below)
 * [ ] Update `version.rb` to a prerelease number, e.g. `1.12.pre.1`
 * [ ] Update `CHANGELOG.md` to include all of the features, bugfixes, etc for that
-  version, from the [bundler-changelog](https://github.com/bundler/bundler-changelog)
-  repo.
+  version.
 * [ ] Run `rake release`, tweet, blog, let people know about the prerelease!
 * [ ] Wait a **minimum of 7 days**
 * [ ] If significant problems are found, increment the prerelease (i.e. 1.12.pre.2)
@@ -90,7 +95,7 @@ Here's the checklist for releasing new minor versions:
 Wait! You're not done yet! After your prelease looks good:
 
 * [ ] Update `version.rb` to a final version (i.e. 1.12.0)
-* [ ] In the [bundler/bundler-site](https://github.com/bundler/bundler-site) repo,
+* [ ] In the [rubygems/bundler-site](https://github.com/rubygems/bundler-site) repo,
   copy the previous version's docs to create a new version (e.g. `cp -r v1.11 v1.12`)
 * [ ] Update the new docs as needed, paying special attention to the "What's new"
   page for this version
@@ -108,7 +113,7 @@ _anything_ wrong as the release manager.
 #### Branching
 
 Minor releases of the next version start with a new release branch from the
-current state of master: `1-12-stable`, and are immediately followed by a `.pre.0` release.
+current state of master: `1-12-stable`, and are immediately followed by a `.pre.1` release.
 
 Once that `-stable` branch has been cut from `master`, changes for that minor
 release series (1.12) will only be made _intentionally_, via patch releases.
@@ -124,16 +129,22 @@ per bug fixed. Then run `rake release` from the `-stable` branch,
 and pour yourself a tasty drink!
 
 PRs containing regression fixes for a patch release of the current minor version
-are merged to master. These commits are then cherry-picked from master onto the
-minor branch (`1-12-stable`).
+are merged to master. These commits need to be cherry-picked from master onto
+the minor branch (`1-12-stable`).
 
-There is a `rake release:patch` rake task that automates creating a patch release.
-It takes a single argument, the _exact_ patch release being made (e.g. `1.12.3`),
-and checks out the appropriate stable branch (`1-12-stable`), grabs the `1.12.3`
-milestone from GitHub, ensures all PRs are closed, and then cherry-picks those changes
-(and only those changes) to the stable branch. The task then bumps the version in the
-version file, prompts you to update the `CHANGELOG.md`, then will commit those changes
-and run `rake release`!
+There is a `rake release:prepare_patch` rake task that helps with creating a patch
+release. It takes a single argument, the _exact_ patch release being made (e.g.
+`1.12.3`), but if not given it will bump the tiny version number by one. This
+task checks out the appropriate stable branch (`1-12-stable`), grabs the
+`1.12.3` milestone from GitHub, ensures all PRs are closed, and then
+cherry-picks those changes (and only those changes) to a new branch based off
+the stable branch. Then bumps the version in the version file and commits that
+change on top of the cherry-picks.
+
+Now you have a release branch ready to be merged into the stable branch. You'll
+want to open a PR from this branch into the stable branch and provided CI is
+green, you can go ahead, merge the PR and run `rake release` from the updated
+stable branch.
 
 ## Beta testing
 
@@ -142,6 +153,6 @@ We :heart: testers, and are big fans of anyone who can run `gem install bundler 
 and try out upcoming releases in their development and staging environments.
 
 There may not always be prereleases or beta versions of Bundler.
-The Bundler team will tweet from the [@bundlerio account](http://twitter.com/bundlerio)
+The Bundler team will tweet from the [@bundlerio account](https://twitter.com/bundlerio)
 when a prerelease or beta version becomes available. You are also always welcome to try
 checking out master and building a gem yourself if you want to try out the latest changes.

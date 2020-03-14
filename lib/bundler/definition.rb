@@ -82,7 +82,11 @@ module Bundler
         @lockfile_contents = Bundler.read_file(lockfile)
         @locked_gems = LockfileParser.new(@lockfile_contents)
         @locked_platforms = @locked_gems.platforms
-        @platforms = @locked_platforms.dup
+        if Bundler.settings[:force_ruby_platform]
+          @platforms = [Gem::Platform::RUBY]
+        else
+          @platforms = @locked_platforms.dup
+        end
         @locked_bundler_version = @locked_gems.bundler_version
         @locked_ruby_version = @locked_gems.ruby_version
 
@@ -228,12 +232,13 @@ module Bundler
     end
 
     def current_dependencies
-      dependencies.select(&:should_include?)
+      dependencies.select do |d|
+        d.should_include? && !d.gem_platforms(@platforms).empty?
+      end
     end
 
     def specs_for(groups)
-      deps = dependencies.select {|d| (d.groups & groups).any? }
-      deps.delete_if {|d| !d.should_include? }
+      deps = dependencies_for(groups)
       specs.for(expand_dependencies(deps))
     end
 
@@ -317,7 +322,7 @@ module Bundler
     end
 
     def spec_git_paths
-      sources.git_sources.map {|s| File.realpath(s.path) }
+      sources.git_sources.map {|s| File.realpath(s.path) if File.exist?(s.path) }.compact
     end
 
     def groups
@@ -708,9 +713,6 @@ module Bundler
         elsif dep.source
           dep.source = sources.get(dep.source)
         end
-        if dep.source.is_a?(Source::Gemspec)
-          dep.platforms.concat(@platforms.map {|p| Dependency::REVERSE_PLATFORM_MAP[p] }.flatten(1)).uniq!
-        end
       end
 
       changes = false
@@ -860,8 +862,8 @@ module Bundler
       @metadata_dependencies ||= begin
         ruby_versions = concat_ruby_version_requirements(@ruby_version)
         if ruby_versions.empty? || !@ruby_version.exact?
-          concat_ruby_version_requirements(RubyVersion.system)
-          concat_ruby_version_requirements(locked_ruby_version_object) unless @unlock[:ruby]
+          concat_ruby_version_requirements(RubyVersion.system, ruby_versions)
+          concat_ruby_version_requirements(locked_ruby_version_object, ruby_versions) unless @unlock[:ruby]
         end
         [
           Dependency.new("Ruby\0", ruby_versions),
@@ -899,10 +901,16 @@ module Bundler
       deps
     end
 
+    def dependencies_for(groups)
+      current_dependencies.reject do |d|
+        (d.groups & groups).empty?
+      end
+    end
+
     def requested_dependencies
       groups = requested_groups
       groups.map!(&:to_sym)
-      dependencies.reject {|d| !d.should_include? || (d.groups & groups).empty? }
+      dependencies_for(groups)
     end
 
     def source_requirements

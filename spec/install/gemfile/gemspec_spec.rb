@@ -117,21 +117,19 @@ RSpec.describe "bundle install from an existing gemspec" do
     build_lib("foo", :path => tmp.join("foo")) do |s|
       s.write("Gemfile", "source '#{file_uri_for(gem_repo1)}'\ngemspec")
       s.add_dependency "actionpack", "=2.3.2"
-      s.add_development_dependency "rake", "=12.3.2"
+      s.add_development_dependency "rake", "=13.0.1"
     end
 
-    Dir.chdir(tmp.join("foo")) do
-      bundle "install"
-      # This should really be able to rely on $stderr, but, it's not written
-      # right, so we can't. In fact, this is a bug negation test, and so it'll
-      # ghost pass in future, and will only catch a regression if the message
-      # doesn't change. Exit codes should be used correctly (they can be more
-      # than just 0 and 1).
-      output = bundle("install --deployment")
-      expect(output).not_to match(/You have added to the Gemfile/)
-      expect(output).not_to match(/You have deleted from the Gemfile/)
-      expect(output).not_to match(/install in deployment mode after changing/)
-    end
+    bundle "install", :dir => tmp.join("foo")
+    # This should really be able to rely on $stderr, but, it's not written
+    # right, so we can't. In fact, this is a bug negation test, and so it'll
+    # ghost pass in future, and will only catch a regression if the message
+    # doesn't change. Exit codes should be used correctly (they can be more
+    # than just 0 and 1).
+    output = bundle("install --deployment", :dir => tmp.join("foo"))
+    expect(output).not_to match(/You have added to the Gemfile/)
+    expect(output).not_to match(/You have deleted from the Gemfile/)
+    expect(output).not_to match(/install in deployment mode after changing/)
   end
 
   it "should match a lockfile without needing to re-resolve" do
@@ -201,7 +199,7 @@ RSpec.describe "bundle install from an existing gemspec" do
 
   it "allows the gemspec to activate other gems" do
     ENV["BUNDLE_PATH__SYSTEM"] = "true"
-    # see https://github.com/bundler/bundler/issues/5409
+    # see https://github.com/rubygems/bundler/issues/5409
     #
     # issue was caused by rubygems having an unresolved gem during a require,
     # so emulate that
@@ -210,7 +208,7 @@ RSpec.describe "bundle install from an existing gemspec" do
     build_lib("foo", :path => bundled_app)
     gemspec = bundled_app("foo.gemspec").read
     bundled_app("foo.gemspec").open("w") do |f|
-      f.write "#{gemspec.strip}.tap { gem 'rack-obama'; require 'rack-obama' }"
+      f.write "#{gemspec.strip}.tap { gem 'rack-obama'; require 'rack/obama' }"
     end
 
     install_gemfile! <<-G
@@ -333,6 +331,8 @@ RSpec.describe "bundle install from an existing gemspec" do
       let(:platform) { "ruby" }
 
       before do
+        skip "not installing for some reason" if Gem.win_platform?
+
         build_lib("foo", :path => tmp.join("foo")) do |s|
           s.add_dependency "rack", "=1.0.0"
         end
@@ -425,7 +425,7 @@ RSpec.describe "bundle install from an existing gemspec" do
           end
         end
 
-        build_lib "foo", :path => "." do |s|
+        build_lib "foo", :path => bundled_app do |s|
           if platform_specific_type == :runtime
             s.add_runtime_dependency dependency
           elsif platform_specific_type == :development

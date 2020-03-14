@@ -40,7 +40,7 @@ module Spec
 
         build_gem "rails", "2.3.2" do |s|
           s.executables = "rails"
-          s.add_dependency "rake",           "12.3.2"
+          s.add_dependency "rake",           "13.0.1"
           s.add_dependency "actionpack",     "2.3.2"
           s.add_dependency "activerecord",   "2.3.2"
           s.add_dependency "actionmailer",   "2.3.2"
@@ -302,6 +302,18 @@ module Spec
             end
           RUBY
         end
+
+        build_gem "has_metadata" do |s|
+          s.metadata = {
+            "bug_tracker_uri"   => "https://example.com/user/bestgemever/issues",
+            "changelog_uri"     => "https://example.com/user/bestgemever/CHANGELOG.md",
+            "documentation_uri" => "https://www.example.info/gems/bestgemever/0.0.1",
+            "homepage_uri"      => "https://bestgemever.example.io",
+            "mailing_list_uri"  => "https://groups.example.com/bestgemever",
+            "source_code_uri"   => "https://example.com/user/bestgemever",
+            "wiki_uri"          => "https://example.com/user/bestgemever/wiki",
+          }
+        end
       end
     end
 
@@ -382,7 +394,7 @@ module Spec
       @_build_repo = File.basename(path)
       yield
       with_gem_path_as Path.base_system_gems do
-        Dir.chdir(path) { gem_command! :generate_index }
+        gem_command! :generate_index, :dir => path
       end
     ensure
       @_build_path = nil
@@ -451,7 +463,6 @@ module Spec
 
       Array(versions).each do |version|
         spec = builder.new(self, name, version)
-        spec.authors = ["no one"] if !spec.authors || spec.authors.empty?
         yield spec if block_given?
         spec._build(options)
       end
@@ -539,6 +550,11 @@ module Spec
         @files = {}
       end
 
+      def capture(cmd, dir)
+        output, _status = Open3.capture2e(cmd, :chdir => dir)
+        output
+      end
+
       def method_missing(*args, &blk)
         @spec.send(*args, &blk)
       end
@@ -557,7 +573,7 @@ module Spec
             "#!/usr/bin/env ruby\n"
           end
           @spec.files << executable
-          write executable, "#{shebang}require '#{@name}' ; puts #{Builders.constantize(@name)}"
+          write executable, "#{shebang}require_relative '../lib/#{@name}' ; puts #{Builders.constantize(@name)}"
         end
       end
 
@@ -599,42 +615,49 @@ module Spec
           def @spec.validate(*); end
         end
 
-        case options[:gemspec]
-        when false
-          # do nothing
-        when :yaml
-          @files["#{name}.gemspec"] = @spec.to_yaml
-        else
-          @files["#{name}.gemspec"] = @spec.to_ruby
-        end
-
         unless options[:no_default]
           gem_source = options[:source] || "path@#{path}"
           @files = _default_files.
-                   merge("lib/#{name}/source.rb" => "#{Builders.constantize(name)}_SOURCE = #{gem_source.to_s.dump}").
+                   merge("lib/#{entrypoint}/source.rb" => "#{Builders.constantize(name)}_SOURCE = #{gem_source.to_s.dump}").
                    merge(@files)
         end
 
         @spec.authors = ["no one"]
+        @spec.files = @files.keys
+
+        case options[:gemspec]
+        when false
+          # do nothing
+        when :yaml
+          @spec.files << "#{name}.gemspec"
+          @files["#{name}.gemspec"] = @spec.to_yaml
+        else
+          @spec.files << "#{name}.gemspec"
+          @files["#{name}.gemspec"] = @spec.to_ruby
+        end
 
         @files.each do |file, source|
           file = Pathname.new(path).join(file)
           FileUtils.mkdir_p(file.dirname)
           File.open(file, "w") {|f| f.puts source }
         end
-        @spec.files = @files.keys
         path
       end
 
       def _default_files
-        @_default_files ||= begin
-          platform_string = " #{@spec.platform}" unless @spec.platform == Gem::Platform::RUBY
-          { "lib/#{name}.rb" => "#{Builders.constantize(name)} = '#{version}#{platform_string}'" }
-        end
+        @_default_files ||= { "lib/#{entrypoint}.rb" => "#{Builders.constantize(name)} = '#{version}#{platform_string}'" }
+      end
+
+      def entrypoint
+        name.tr("-", "/")
       end
 
       def _default_path
         @context.tmp("libs", @spec.full_name)
+      end
+
+      def platform_string
+        " #{@spec.platform}" unless @spec.platform == Gem::Platform::RUBY
       end
     end
 
@@ -643,14 +666,12 @@ module Spec
         path = options[:path] || _default_path
         source = options[:source] || "git@#{path}"
         super(options.merge(:path => path, :source => source))
-        Dir.chdir(path) do
-          `git init`
-          `git add *`
-          `git config user.email "lol@wut.com"`
-          `git config user.name "lolwut"`
-          `git config commit.gpgsign false`
-          `git commit -m "OMG INITIAL COMMIT"`
-        end
+        capture("git init", path)
+        capture("git add *", path)
+        capture("git config user.email \"lol@wut.com\"", path)
+        capture("git config user.name \"lolwut\"", path)
+        capture("git config commit.gpgsign false", path)
+        capture("git commit -m \"OMG INITIAL COMMIT\"", path)
       end
     end
 
@@ -658,15 +679,14 @@ module Spec
       def _build(options)
         path = options[:path] || _default_path
         super(options.merge(:path => path))
-        Dir.chdir(path) do
-          `git init --bare`
-        end
+        capture("git init --bare", path)
       end
     end
 
     class GitUpdater < LibBuilder
-      def silently(str)
-        `#{str} 2>#{Bundler::NULL}`
+      def silently(str, dir)
+        output, _error, _status = Open3.capture3(str, :chdir => dir)
+        output
       end
 
       def _build(options)
@@ -674,34 +694,32 @@ module Spec
         update_gemspec = options[:gemspec] || false
         source = options[:source] || "git@#{libpath}"
 
-        Dir.chdir(libpath) do
-          silently "git checkout master"
+        silently "git checkout master", libpath
 
-          if branch = options[:branch]
-            raise "You can't specify `master` as the branch" if branch == "master"
-            escaped_branch = Shellwords.shellescape(branch)
+        if branch = options[:branch]
+          raise "You can't specify `master` as the branch" if branch == "master"
+          escaped_branch = Shellwords.shellescape(branch)
 
-            if `git branch | grep #{escaped_branch}`.empty?
-              silently("git branch #{escaped_branch}")
-            end
-
-            silently("git checkout #{escaped_branch}")
-          elsif tag = options[:tag]
-            `git tag #{Shellwords.shellescape(tag)}`
-          elsif options[:remote]
-            silently("git remote add origin #{options[:remote]}")
-          elsif options[:push]
-            silently("git push origin #{options[:push]}")
+          if capture("git branch | grep #{escaped_branch}", libpath).empty?
+            silently("git branch #{escaped_branch}", libpath)
           end
 
-          current_ref = `git rev-parse HEAD`.strip
-          _default_files.keys.each do |path|
-            _default_files[path] += "\n#{Builders.constantize(name)}_PREV_REF = '#{current_ref}'"
-          end
-          super(options.merge(:path => libpath, :gemspec => update_gemspec, :source => source))
-          `git add *`
-          `git commit -m "BUMP"`
+          silently("git checkout #{escaped_branch}", libpath)
+        elsif tag = options[:tag]
+          capture("git tag #{Shellwords.shellescape(tag)}", libpath)
+        elsif options[:remote]
+          silently("git remote add origin #{options[:remote]}", libpath)
+        elsif options[:push]
+          silently("git push origin #{options[:push]}", libpath)
         end
+
+        current_ref = silently("git rev-parse HEAD", libpath).strip
+        _default_files.keys.each do |path|
+          _default_files[path] += "\n#{Builders.constantize(name)}_PREV_REF = '#{current_ref}'"
+        end
+        super(options.merge(:path => libpath, :gemspec => update_gemspec, :source => source))
+        capture("git add *", libpath)
+        capture("git commit -m \"BUMP\"", libpath)
       end
     end
 
@@ -722,7 +740,7 @@ module Spec
 
       def git(cmd)
         Bundler::SharedHelpers.with_clean_git_env do
-          Dir.chdir(@path) { `git #{cmd}`.strip }
+          Open3.capture2e("git #{cmd}", :chdir => path)[0].strip
         end
       end
     end
@@ -731,13 +749,18 @@ module Spec
       def _build(opts)
         lib_path = super(opts.merge(:path => @context.tmp(".tmp/#{@spec.full_name}"), :no_default => opts[:no_default]))
         destination = opts[:path] || _default_path
-        Dir.chdir(lib_path) do
-          FileUtils.mkdir_p(destination)
+        FileUtils.mkdir_p(lib_path.join(destination))
 
-          @spec.authors = ["that guy"] if !@spec.authors || @spec.authors.empty?
-
-          Bundler.rubygems.build(@spec, opts[:skip_validation])
+        if opts[:gemspec] == :yaml || opts[:gemspec] == false
+          Dir.chdir(lib_path) do
+            Bundler.rubygems.build(@spec, opts[:skip_validation])
+          end
+        elsif opts[:skip_validation]
+          @context.gem_command "build --force #{@spec.name}", :dir => lib_path
+        else
+          @context.gem_command! "build #{@spec.name}", :dir => lib_path
         end
+
         gem_path = File.expand_path("#{@spec.full_name}.gem", lib_path)
         if opts[:to_system]
           @context.system_gems gem_path, :keep_path => true
@@ -755,7 +778,10 @@ module Spec
 
     class PluginBuilder < GemBuilder
       def _default_files
-        @_default_files ||= super.merge("plugins.rb" => "")
+        @_default_files ||= {
+          "lib/#{name}.rb" => "#{Builders.constantize(name)} = '#{version}#{platform_string}'",
+          "plugins.rb" => "",
+        }
       end
     end
 

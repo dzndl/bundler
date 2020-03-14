@@ -7,6 +7,7 @@ RSpec.describe "Bundler.load" do
         source "#{file_uri_for(gem_repo1)}"
         gem "rack"
       G
+      allow(Bundler::SharedHelpers).to receive(:pwd).and_return(bundled_app)
     end
 
     it "provides a list of the env dependencies" do
@@ -32,6 +33,7 @@ RSpec.describe "Bundler.load" do
         gem "rack"
       G
       bundle! :install
+      allow(Bundler::SharedHelpers).to receive(:pwd).and_return(bundled_app)
     end
 
     it "provides a list of the env dependencies" do
@@ -58,7 +60,7 @@ RSpec.describe "Bundler.load" do
     end
 
     it "does not find a Gemfile above the testing directory" do
-      bundler_gemfile = tmp.join("../Gemfile")
+      bundler_gemfile = Pathname.new(__dir__).join("../../Gemfile")
       unless File.exist?(bundler_gemfile)
         FileUtils.touch(bundler_gemfile)
         @remove_bundler_gemfile = true
@@ -80,7 +82,7 @@ RSpec.describe "Bundler.load" do
       G
 
       ruby! <<-RUBY
-        require "bundler"
+        require "#{lib_dir}/bundler"
         Bundler.setup :default
         Bundler.require :default
         puts RACK
@@ -101,7 +103,7 @@ RSpec.describe "Bundler.load" do
         source "#{file_uri_for(gem_repo1)}"
         gem "activerecord"
       G
-
+      allow(Bundler::SharedHelpers).to receive(:find_gemfile).and_return(bundled_app_gemfile)
       Bundler.load.specs.each do |spec|
         expect(spec.to_yaml).not_to match(/^\s+source:/)
         expect(spec.to_yaml).not_to match(/^\s+groups:/)

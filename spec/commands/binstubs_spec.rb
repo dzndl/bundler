@@ -1,6 +1,10 @@
 # frozen_string_literal: true
 
 RSpec.describe "bundle binstubs <gem>" do
+  before do
+    skip "https://github.com/rubygems/bundler/issues/6894" if Gem.win_platform?
+  end
+
   context "when the gem exists in the lockfile" do
     it "sets up the binstub" do
       install_gemfile <<-G
@@ -82,7 +86,7 @@ RSpec.describe "bundle binstubs <gem>" do
 
         bundle "binstubs rack"
 
-        File.open("bin/bundle", "wb") do |file|
+        File.open(bundled_app("bin/bundle"), "wb") do |file|
           file.print "OMG"
         end
 
@@ -133,7 +137,7 @@ RSpec.describe "bundle binstubs <gem>" do
 
       context "when BUNDLER_VERSION is set" do
         it "runs the correct version of bundler" do
-          sys_exec "#{bundled_app("bin/bundle")} install", "BUNDLER_VERSION" => "999.999.999"
+          sys_exec "#{bundled_app("bin/bundle")} install", :env => { "BUNDLER_VERSION" => "999.999.999" }
           expect(exitstatus).to eq(42) if exitstatus
           expect(err).to include("Activating bundler (~> 999.999) failed:").
             and include("To install the version of bundler this project requires, run `gem install bundler -v '~> 999.999'`")
@@ -141,38 +145,61 @@ RSpec.describe "bundle binstubs <gem>" do
       end
 
       context "when a lockfile exists with a locked bundler version" do
-        it "runs the correct version of bundler when the version is newer" do
-          lockfile lockfile.gsub(system_bundler_version, "999.999.999")
-          sys_exec "#{bundled_app("bin/bundle")} install"
-          expect(exitstatus).to eq(42) if exitstatus
-          expect(err).to include("Activating bundler (~> 999.999) failed:").
-            and include("To install the version of bundler this project requires, run `gem install bundler -v '~> 999.999'`")
+        context "and the version is newer" do
+          before do
+            lockfile lockfile.gsub(system_bundler_version, "999.999")
+          end
+
+          it "runs the correct version of bundler" do
+            sys_exec "#{bundled_app("bin/bundle")} install"
+            expect(exitstatus).to eq(42) if exitstatus
+            expect(err).to include("Activating bundler (~> 999.999) failed:").
+              and include("To install the version of bundler this project requires, run `gem install bundler -v '~> 999.999'`")
+          end
         end
 
-        it "runs the correct version of bundler when the version is older and a different major" do
-          simulate_bundler_version "55"
-          lockfile lockfile.gsub(system_bundler_version, "44.0")
-          sys_exec "#{bundled_app("bin/bundle")} install"
-          expect(exitstatus).to eq(42) if exitstatus
-          expect(err).to include("Activating bundler (~> 44.0) failed:").
-            and include("To install the version of bundler this project requires, run `gem install bundler -v '~> 44.0'`")
+        context "and the version is older and a different major" do
+          let(:system_bundler_version) { "55" }
+
+          before do
+            lockfile lockfile.gsub(/BUNDLED WITH\n   .*$/m, "BUNDLED WITH\n   44.0")
+          end
+
+          it "runs the correct version of bundler" do
+            sys_exec "#{bundled_app("bin/bundle")} install"
+            expect(exitstatus).to eq(42) if exitstatus
+            expect(err).to include("Activating bundler (~> 44.0) failed:").
+              and include("To install the version of bundler this project requires, run `gem install bundler -v '~> 44.0'`")
+          end
         end
 
-        it "runs the available version of bundler when the version is older and the same major" do
-          simulate_bundler_version "55.1"
-          lockfile lockfile.gsub(system_bundler_version, "55.0")
-          sys_exec "#{bundled_app("bin/bundle")} install"
-          expect(exitstatus).not_to eq(42) if exitstatus
-          expect(err).not_to include("Activating bundler (~> 55.0) failed:")
+        context "and the version is older and the same major" do
+          let(:system_bundler_version) { "55.1" }
+
+          before do
+            lockfile lockfile.gsub(/BUNDLED WITH\n   .*$/m, "BUNDLED WITH\n   55.0")
+          end
+
+          it "runs the available version of bundler when the version is older and the same major" do
+            sys_exec "#{bundled_app("bin/bundle")} install"
+            expect(exitstatus).not_to eq(42) if exitstatus
+            expect(err).not_to include("Activating bundler (~> 55.0) failed:")
+          end
         end
 
-        it "runs the correct version of bundler when the version is a pre-release" do
-          simulate_bundler_version "55"
-          lockfile lockfile.gsub(system_bundler_version, "2.12.0.a")
-          sys_exec "#{bundled_app("bin/bundle")} install"
-          expect(exitstatus).to eq(42) if exitstatus
-          expect(err).to include("Activating bundler (~> 2.12.a) failed:").
-            and include("To install the version of bundler this project requires, run `gem install bundler -v '~> 2.12.a'`")
+        context "and the version is a pre-releaser" do
+          let(:system_bundler_version) { "55" }
+
+          before do
+            lockfile lockfile.gsub(/BUNDLED WITH\n   .*$/m, "BUNDLED WITH\n   2.12.0.a")
+          end
+
+          it "runs the correct version of bundler when the version is a pre-release" do
+            sys_exec "#{bundled_app("bin/bundle")} install"
+            expect(exitstatus).to eq(42) if exitstatus
+            expect(err).to include("Activating bundler (~> 2.12.a) failed:").
+              and include("To install the version of bundler this project requires, run `gem install bundler -v '~> 2.12.a'`")
+          end
         end
       end
 
@@ -194,7 +221,7 @@ RSpec.describe "bundle binstubs <gem>" do
 
       context "without a lockfile" do
         it "falls back to the latest installed bundler" do
-          FileUtils.rm bundled_app("Gemfile.lock")
+          FileUtils.rm bundled_app_lock
           sys_exec! bundled_app("bin/bundle").to_s
           expect(out).to eq "system bundler #{system_bundler_version}\n[]"
         end
@@ -251,6 +278,8 @@ RSpec.describe "bundle binstubs <gem>" do
     end
 
     it "sets correct permissions for binstubs" do
+      skip "https://github.com/rubygems/bundler/issues/6895" if Gem.win_platform?
+
       with_umask(0o002) do
         install_gemfile <<-G
           source "#{file_uri_for(gem_repo1)}"
@@ -264,7 +293,7 @@ RSpec.describe "bundle binstubs <gem>" do
     end
 
     context "when using --shebang" do
-      it "sets the specified shebang for the the binstub" do
+      it "sets the specified shebang for the binstub" do
         install_gemfile <<-G
           source "#{file_uri_for(gem_repo1)}"
           gem "rack"
@@ -272,7 +301,7 @@ RSpec.describe "bundle binstubs <gem>" do
 
         bundle "binstubs rack --shebang jruby"
 
-        expect(File.open("bin/rackup").gets).to eq("#!/usr/bin/env jruby\n")
+        expect(File.open(bundled_app("bin/rackup")).gets).to eq("#!/usr/bin/env jruby\n")
       end
     end
   end
@@ -435,7 +464,7 @@ RSpec.describe "bundle binstubs <gem>" do
       G
 
       bundle "config set auto_install 1"
-      bundle "binstubs rack", :env => { "BUNDLE_INSTALL" => 1 }
+      bundle "binstubs rack", :env => { "BUNDLE_INSTALL" => "1" }
       expect(out).not_to include("Installing rack 1.0.0")
     end
   end

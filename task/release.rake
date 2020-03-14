@@ -1,16 +1,17 @@
 # frozen_string_literal: true
 
-require "bundler/gem_tasks"
-task :build => ["build_metadata", "man:build", "generate_files"] do
+require_relative "../lib/bundler/gem_tasks"
+task :build => ["build_metadata"] do
   Rake::Task["build_metadata:clean"].tap(&:reenable).real_invoke
 end
-task :release => ["man:build", "release:verify_files", "release:verify_github", "build_metadata"]
+task "release:rubygem_push" => ["release:verify_docs", "release:verify_files", "release:verify_github", "build_metadata", "release:github"]
 
 namespace :release do
+  task :verify_docs => :"man:check"
+
   task :verify_files do
-    git_list = IO.popen("git ls-files -z", &:read).split("\x0").select {|f| f.match(%r{^(lib|exe)/}) }
+    git_list = IO.popen("git ls-files -z", &:read).split("\x0").select {|f| f.match(%r{^(lib|man|exe)/}) }
     git_list += %w[CHANGELOG.md LICENSE.md README.md bundler.gemspec]
-    git_list += Dir.glob("man/**/*")
 
     gem_list = Gem::Specification.load("bundler.gemspec").files
 
@@ -74,7 +75,10 @@ namespace :release do
     loop do
       print(prompt)
       print(": ") unless prompt.empty?
-      break if $stdin.gets.strip == "y"
+
+      answer = $stdin.gets.strip
+      break if answer == "y"
+      abort if answer == "n"
     end
   rescue Interrupt
     abort
@@ -125,8 +129,9 @@ namespace :release do
     relevant.join("\n").strip
   end
 
+  desc "Push the release to Github releases"
   task :github, :version do |_t, args|
-    version = Gem::Version.new(args.version)
+    version = Gem::Version.new(args.version || bundler_spec.version)
     tag = "v#{version}"
 
     gh_api_post :path => "/repos/bundler/bundler/releases",
@@ -138,12 +143,8 @@ namespace :release do
                 }
   end
 
-  task :release do |args|
-    Rake::Task["release:github"].invoke(args.version)
-  end
-
-  desc "Make a patch release with the PRs from master in the patch milestone"
-  task :patch, :version do |_t, args|
+  desc "Prepare a patch release with the PRs from master in the patch milestone"
+  task :prepare_patch, :version do |_t, args|
     version = args.version
 
     version ||= begin
@@ -157,7 +158,7 @@ namespace :release do
       segments.join(".")
     end
 
-    confirm "You are about to release #{version}, currently #{bundler_spec.version}"
+    puts "Cherry-picking PRs milestoned for #{version} (currently #{bundler_spec.version}) into the stable branch..."
 
     milestones = gh_api_request(:path => "repos/bundler/bundler/milestones?state=open")
     unless patch_milestone = milestones.find {|m| m["title"] == version }
@@ -171,10 +172,21 @@ namespace :release do
     end
     prs.compact!
 
-    bundler_spec.version = version
-
     branch = version.split(".", 3)[0, 2].push("stable").join("-")
-    sh("git", "checkout", branch)
+    sh("git", "checkout", "-b", "release/#{version}", branch)
+
+    commits = `git log --oneline origin/master --`.split("\n").map {|l| l.split(/\s/, 2) }.reverse
+    commits.select! {|_sha, message| message =~ /(Auto merge of|Merge pull request|Merge) ##{Regexp.union(*prs)}/ }
+
+    abort "Could not find commits for all PRs" unless commits.size == prs.size
+
+    if commits.any? && !system("git", "cherry-pick", "-x", "-m", "1", *commits.map(&:first))
+      warn "Opening a new shell to fix the cherry-pick errors. Press Ctrl-D when done to resume the task"
+
+      unless system(ENV["SHELL"] || "zsh")
+        abort "Failed to resolve conflicts on a different shell. Resolve conflicts manually and finish the task manually"
+      end
+    end
 
     version_file = "lib/bundler/version.rb"
     version_contents = File.read(version_file)
@@ -183,28 +195,7 @@ namespace :release do
     end
     File.open(version_file, "w") {|f| f.write(version_contents) }
 
-    commits = `git log --oneline origin/master --`.split("\n").map {|l| l.split(/\s/, 2) }.reverse
-    commits.select! {|_sha, message| message =~ /(Auto merge of|Merge pull request|Merge) ##{Regexp.union(*prs)}/ }
-
-    abort "Could not find commits for all PRs" unless commits.size == prs.size
-
-    if commits.any? && !system("git", "cherry-pick", "-x", "-m", "1", *commits.map(&:first))
-      warn "Opening a new shell to fix the cherry-pick errors"
-      abort unless system("zsh")
-    end
-
-    prs.each do |pr|
-      system("open", "https://github.com/bundler/bundler/pull/#{pr}")
-      confirm "Add to the changelog"
-    end
-
-    confirm "Update changelog"
-    sh("git", "commit", "-am", "Version #{version} with changelog")
-    sh("rake", "release")
-    sh("git", "checkout", "master")
-    sh("git", "pull")
-    sh("git", "merge", "v#{version}", "--no-edit")
-    sh("git", "push")
+    sh("git", "commit", "-am", "Version #{version}")
   end
 
   desc "Open all PRs that have not been included in a stable release"
@@ -214,14 +205,28 @@ namespace :release do
       commits.reverse_each.map {|c| c =~ /(Auto merge of|Merge pull request|Merge) #(\d+)/ && $2 }.compact
     end
 
-    last_stable = `git ls-remote origin`.split("\n").map {|r| r =~ %r{refs/tags/v([\d.]+)$} && $1 }.compact.map {|v| Gem::Version.create(v) }.max
-    last_stable = last_stable.segments[0, 2].<<("stable").join("-")
+    def minor_release_tags
+      `git ls-remote origin`.split("\n").map {|r| r =~ %r{refs/tags/v([\d.]+)$} && $1 }.compact.map {|v| Gem::Version.create(Gem::Version.create(v).segments[0, 2].join(".")) }.sort.uniq
+    end
 
-    in_release = prs("HEAD") - prs(last_stable)
+    def to_stable_branch(release_tag)
+      release_tag.segments[0, 2].<<("stable").join("-")
+    end
+
+    last_stable = to_stable_branch(minor_release_tags[-1])
+    previous_to_last_stable = to_stable_branch(minor_release_tags[-2])
+
+    in_release = prs("HEAD") - prs(last_stable) - prs(previous_to_last_stable)
+
+    print "About to review #{in_release.size} pending PRs. "
+
+    confirm "Continue? (y/n)"
 
     in_release.each do |pr|
-      system("open", "https://github.com/bundler/bundler/pull/#{pr}")
-      confirm
+      url_opener = /darwin/ =~ RUBY_PLATFORM ? "open" : "xdg-open"
+      url = "https://github.com/bundler/bundler/pull/#{pr}"
+      print "#{url}. (n)ext/(o)pen? "
+      system(url_opener, url, :out => IO::NULL, :err => IO::NULL) if $stdin.gets.strip == "o"
     end
   end
 end

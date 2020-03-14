@@ -18,8 +18,7 @@ RSpec.describe "bundle check" do
       gem "rails"
     G
 
-    Dir.chdir tmp
-    bundle "check --gemfile bundled_app/Gemfile"
+    bundle "check --gemfile bundled_app/Gemfile", :dir => tmp
     expect(out).to include("The Gemfile's dependencies are satisfied")
   end
 
@@ -29,11 +28,11 @@ RSpec.describe "bundle check" do
       gem "rails"
     G
 
-    FileUtils.rm("Gemfile.lock")
+    FileUtils.rm(bundled_app_lock)
 
     bundle "check"
 
-    expect(bundled_app("Gemfile.lock")).to exist
+    expect(bundled_app_lock).to exist
   end
 
   it "does not create a Gemfile.lock if --dry-run was passed" do
@@ -42,11 +41,11 @@ RSpec.describe "bundle check" do
       gem "rails"
     G
 
-    FileUtils.rm("Gemfile.lock")
+    FileUtils.rm(bundled_app_lock)
 
     bundle "check --dry-run"
 
-    expect(bundled_app("Gemfile.lock")).not_to exist
+    expect(bundled_app_lock).not_to exist
   end
 
   it "prints a generic error if the missing gems are unresolvable" do
@@ -232,44 +231,49 @@ RSpec.describe "bundle check" do
     G
 
     bundle! "install", forgotten_command_line_options(:deployment => true)
-    FileUtils.rm(bundled_app("Gemfile.lock"))
+    FileUtils.rm(bundled_app_lock)
 
     bundle :check
     expect(last_command).to be_failure
   end
 
   context "--path", :bundler => "< 3" do
-    before do
-      gemfile <<-G
-        source "#{file_uri_for(gem_repo1)}"
-        gem "rails"
-      G
-      bundle "install --path vendor/bundle"
+    context "after installing gems in the proper directory" do
+      before do
+        gemfile <<-G
+          source "#{file_uri_for(gem_repo1)}"
+          gem "rails"
+        G
+        bundle "install --path vendor/bundle"
 
-      FileUtils.rm_rf(bundled_app(".bundle"))
+        FileUtils.rm_rf(bundled_app(".bundle"))
+      end
+
+      it "returns success" do
+        bundle! "check --path vendor/bundle"
+        expect(out).to include("The Gemfile's dependencies are satisfied")
+      end
+
+      it "should write to .bundle/config" do
+        bundle "check --path vendor/bundle"
+        bundle! "check"
+      end
     end
 
-    it "returns success" do
-      bundle! "check --path vendor/bundle"
-      expect(out).to include("The Gemfile's dependencies are satisfied")
-    end
+    context "after installing gems on a different directory" do
+      before do
+        install_gemfile <<-G
+          source "#{file_uri_for(gem_repo1)}"
+          gem "rails"
+        G
 
-    it "should write to .bundle/config", :bundler => "< 3" do
-      bundle "check --path vendor/bundle"
-      bundle! "check"
-    end
-  end
+        bundle "check --path vendor/bundle"
+      end
 
-  context "--path vendor/bundle after installing gems in the default directory" do
-    it "returns false" do
-      install_gemfile <<-G
-        source "#{file_uri_for(gem_repo1)}"
-        gem "rails"
-      G
-
-      bundle "check --path vendor/bundle"
-      expect(exitstatus).to eq(1) if exitstatus
-      expect(err).to match(/The following gems are missing/)
+      it "returns false" do
+        expect(exitstatus).to eq(1) if exitstatus
+        expect(err).to match(/The following gems are missing/)
+      end
     end
   end
 

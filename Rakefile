@@ -1,6 +1,5 @@
 # frozen_string_literal: true
 
-$:.unshift File.expand_path("../lib", __FILE__)
 require "benchmark"
 
 require_relative "spec/support/rubygems_ext"
@@ -25,41 +24,18 @@ task :spec do
 end
 
 namespace :spec do
-  def safe_task(&block)
-    yield
-    true
-  rescue StandardError
-    false
-  end
-
   desc "Ensure spec dependencies are installed"
   task :deps do
     Spec::Rubygems.dev_setup
+
+    Spec::Rubygems.install_test_deps
   end
 
-  namespace :travis do
-    task :deps do
-      # Give the travis user a name so that git won't fatally error
-      system "sudo sed -i 's/1000::/1000:Travis:/g' /etc/passwd"
-      # Strip secure_path so that RVM paths transmit through sudo -E
-      system "sudo sed -i '/secure_path/d' /etc/sudoers"
-      # Refresh packages index that the ones we need can be installed
-      sh "sudo apt-get update"
-      # Install groff so ronn can generate man/help pages
-      sh "sudo apt-get install groff-base -y"
-      # Install graphviz so that the viz specs can run
-      sh "sudo apt-get install graphviz -y"
+  desc "Ensure spec dependencies for running in parallel are installed"
+  task :parallel_deps do
+    Spec::Rubygems.dev_setup
 
-      # Install the gems with a consistent version of RubyGems
-      sh "gem update --system 3.0.4"
-
-      # Install the other gem deps, etc
-      Rake::Task["spec:deps"].invoke
-    end
-  end
-
-  task :clean do
-    rm_rf "tmp"
+    Spec::Rubygems.install_parallel_test_deps
   end
 
   desc "Run the real-world spec suite"
@@ -70,7 +46,7 @@ namespace :spec do
     task :record => %w[set_record realworld]
 
     task :set_record do
-      ENV["BUNDLER_SPEC_FORCE_RECORD"] = "TRUE"
+      ENV["BUNDLER_SPEC_FORCE_RECORD"] = "1"
     end
   end
 
@@ -79,100 +55,40 @@ namespace :spec do
   end
 
   desc "Run the spec suite with the sudo tests"
-  task :sudo => %w[set_sudo spec]
+  task :sudo => %w[set_sudo] do
+    require "open3"
+    output, status = Open3.capture2e("sudo", "cp", "/etc/sudoers", "tmp/old_sudoers")
+    raise "Couldn't read sudoers file: #{output}" unless status.success?
+
+    begin
+      output, status = Open3.capture2e("sudo sed -i '/secure_path/d' /etc/sudoers")
+      raise "Couldn't configure sudo to preserve path: #{output}" unless status.success?
+
+      raise "Couldn't configure sudo correctly to preserve path" unless `ruby -v` == `sudo -E ruby -v`
+
+      sh("sudo -E bin/rspec")
+    ensure
+      system("sudo", "cp", "tmp/old_sudoers", "/etc/sudoers")
+      system("sudo", "chown", "-R", ENV["USER"], "tmp")
+    end
+  end
 
   task :set_sudo do
     ENV["BUNDLER_SUDO_TESTS"] = "1"
-  end
-
-  # RubyGems specs by version
-  namespace :rubygems do
-    # When editing this list, also edit .travis.yml!
-    branches = %w[master]
-    releases = %w[v2.5.2 v2.6.14 v2.7.10 v3.0.4]
-    (branches + releases).each do |rg|
-      desc "Run specs with RubyGems #{rg}"
-      task rg do
-        sh("bin/rspec --format progress")
-      end
-
-      # Create tasks like spec:rubygems:v1.8.3:sudo to run the sudo specs
-      namespace rg do
-        task :sudo => ["set_sudo", rg]
-        task :realworld => ["set_realworld", rg]
-      end
-
-      task "set_#{rg}" do
-        ENV["RGV"] = rg
-      end
-
-      task rg => ["set_#{rg}"]
-      task "rubygems:all" => rg
-    end
-
-    desc "Run specs under a RubyGems checkout (set RGV=path)"
-    task "co" do
-      sh("bin/rspec --format progress")
-    end
-
-    namespace "co" do
-      task :sudo => ["set_sudo", "co"]
-      task :realworld => ["set_realworld", "co"]
-    end
-
-    task "setup_co" do
-      ENV["RGV"] = if `git -C "#{File.expand_path("..")}" remote --verbose 2> #{IO::NULL}` =~ /rubygems/i
-        File.expand_path("..")
-      else
-        File.expand_path("tmp/rubygems")
-      end
-    end
-
-    task "co" => "setup_co"
-    task "rubygems:all" => "co"
-  end
-
-  desc "Run the tests on Travis CI against a RubyGem version (using ENV['RGV'])"
-  task :travis do
-    rg = ENV["RGV"] || raise("RubyGems version is required on Travis!")
-
-    rg = "co" if File.directory?(File.expand_path(ENV["RGV"]))
-
-    # disallow making network requests on CI
-    ENV["BUNDLER_SPEC_PRE_RECORDED"] = "TRUE"
-
-    puts "\n\e[1;33m[Travis CI] Running bundler specs against RubyGems #{rg}\e[m\n\n"
-    specs = safe_task { Rake::Task["spec:rubygems:#{rg}"].invoke }
-
-    Rake::Task["spec:rubygems:#{rg}"].reenable
-
-    puts "\n\e[1;33m[Travis CI] Running bundler sudo specs against RubyGems #{rg}\e[m\n\n"
-    sudos = system("sudo -E rake spec:rubygems:#{rg}:sudo")
-    # clean up by chowning the newly root-owned tmp directory back to the travis user
-    system("sudo chown -R #{ENV["USER"]} #{File.join(File.dirname(__FILE__), "tmp")}")
-
-    Rake::Task["spec:rubygems:#{rg}"].reenable
-
-    puts "\n\e[1;33m[Travis CI] Running bundler real world specs against RubyGems #{rg}\e[m\n\n"
-    realworld = safe_task { Rake::Task["spec:rubygems:#{rg}:realworld"].invoke }
-
-    { "specs" => specs, "sudo" => sudos, "realworld" => realworld }.each do |name, passed|
-      if passed
-        puts "\e[0;32m[Travis CI] #{name} passed\e[m"
-      else
-        puts "\e[0;31m[Travis CI] #{name} failed\e[m"
-      end
-    end
-
-    unless specs && sudos && realworld
-      raise "Spec run failed, please review the log for more information"
-    end
   end
 end
 
 desc "Run RuboCop"
 task :rubocop do
   sh("bin/rubocop --parallel")
+end
+
+desc "Check RVM integration"
+task :check_rvm_integration do
+  # The rubygems-bundler gem is installed by RVM by default and it could easily
+  # break when we change bundler. Make sure that binstubs still run with it
+  # installed.
+  sh("gem install rubygems-bundler && RUBYOPT=-Ilib rake -T")
 end
 
 namespace :man do
@@ -182,7 +98,11 @@ namespace :man do
     begin
       Spec::Rubygems.gem_require("ronn")
     rescue Gem::LoadError => e
+      desc "Build the man pages"
       task(:build) { abort "We couln't activate ronn (#{e.requirement}). Try `gem install ronn:'#{e.requirement}'` to be able to build the help pages" }
+
+      desc "Verify man pages are in sync"
+      task(:check) { abort "We couln't activate ronn (#{e.requirement}). Try `gem install ronn:'#{e.requirement}'` to be able to build the help pages" }
     else
       directory "man"
 
@@ -196,7 +116,7 @@ namespace :man do
         index << [ronn, File.basename(roff)]
 
         file roff => ["man", ronn] do
-          sh "#{Gem.ruby} -S ronn --roff --pipe #{ronn} > #{roff}"
+          sh "bin/ronn --roff --pipe --date #{Time.now.strftime("%Y-%m-%d")} #{ronn} > #{roff}"
         end
 
         file "#{roff}.txt" => roff do
@@ -230,6 +150,25 @@ namespace :man do
 
       desc "Build the man pages"
       task :build => ["man:clean", "man:build_all_pages"]
+
+      desc "Verify man pages are in sync"
+      task :check => :build do
+        sh("git diff --quiet --ignore-all-space man") do |outcome, _|
+          if outcome
+            puts
+            puts "Manpages are in sync!"
+            puts
+          else
+            sh("GIT_PAGER=cat git diff --ignore-all-space man")
+
+            puts
+            puts "Man pages are out of sync. Above you can see the diff that got generated from rebuilding them. Please review and commit the results."
+            puts
+
+            exit(1)
+          end
+        end
+      end
     end
   end
 end
@@ -251,9 +190,6 @@ rescue Gem::LoadError => e
 
     desc "Vendor a specific version of net-http-persistent"
     task(:"net-http-persistent") { abort msg }
-
-    desc "Vendor a specific version of connection_pool"
-    task(:connection_pool) { abort msg }
   end
 else
   desc "Vendor a specific version of molinillo"
@@ -275,9 +211,6 @@ else
     lib.vendor_lib = "lib/bundler/vendor/thor"
   end
 
-  # We currently cherry-pick changes to use `require_relative` internally
-  # instead of regular `require`. They are already in fileutils' master branch
-  # but still need to be released.
   desc "Vendor a specific version of fileutils"
   Automatiek::RakeTask.new("fileutils") do |lib|
     lib.download = { :github => "https://github.com/ruby/fileutils" }
@@ -286,28 +219,31 @@ else
     lib.vendor_lib = "lib/bundler/vendor/fileutils"
   end
 
-  # Currently `net-http-persistent` and it's dependency `connection_pool` are
-  # vendored separately, but `connection_pool` references inside the vendored
-  # copy of `net-http-persistent` are not properly updated to refer to the
-  # vendored copy of `connection_pool`, so they need to be manually updated.
-  # This will be automated once https://github.com/segiddins/automatiek/pull/3
-  # is included in `automatiek` and we start using the new API for vendoring
-  # subdependencies.
-
+  # We currently cherry-pick changes to use `require_relative` internally
+  # instead of regular `require`. They are pending review at
+  # https://github.com/drbrain/net-http-persistent/pull/106
   desc "Vendor a specific version of net-http-persistent"
   Automatiek::RakeTask.new("net-http-persistent") do |lib|
     lib.download = { :github => "https://github.com/drbrain/net-http-persistent" }
     lib.namespace = "Net::HTTP::Persistent"
     lib.prefix = "Bundler::Persistent"
     lib.vendor_lib = "lib/bundler/vendor/net-http-persistent"
-  end
 
-  desc "Vendor a specific version of connection_pool"
-  Automatiek::RakeTask.new("connection_pool") do |lib|
-    lib.download = { :github => "https://github.com/mperham/connection_pool" }
-    lib.namespace = "ConnectionPool"
-    lib.prefix = "Bundler"
-    lib.vendor_lib = "lib/bundler/vendor/connection_pool"
+    lib.dependency("connection_pool") do |sublib|
+      sublib.version = "v2.2.2"
+      sublib.download = { :github => "https://github.com/mperham/connection_pool" }
+      sublib.namespace = "ConnectionPool"
+      sublib.prefix = "Bundler"
+      sublib.vendor_lib = "lib/bundler/vendor/connection_pool"
+    end
+
+    lib.dependency("uri") do |sublib|
+      sublib.version = "master"
+      sublib.download = { :github => "https://github.com/ruby/uri" }
+      sublib.namespace = "URI"
+      sublib.prefix = "Bundler"
+      sublib.vendor_lib = "lib/bundler/vendor/uri"
+    end
   end
 end
 
@@ -324,5 +260,3 @@ end
 task :default => :spec
 
 Dir["task/*.rake"].each(&method(:load))
-
-task :generate_files => Rake::Task.tasks.select {|t| t.name.start_with?("lib/bundler/generated") }

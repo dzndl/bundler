@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "rubygems" unless defined?(Gem)
+
 module Bundler
   class RubygemsIntegration
     if defined?(Gem::Ext::Builder::CHDIR_MONITOR)
@@ -247,12 +249,6 @@ module Bundler
       EXT_LOCK
     end
 
-    def fetch_prerelease_specs
-      fetch_specs(false, true)
-    rescue Gem::RemoteFetcher::FetchError
-      {} # if we can't download them, there aren't any
-    end
-
     def with_build_args(args)
       ext_lock.synchronize do
         old_args = build_args
@@ -350,7 +346,7 @@ module Bundler
           raise e
         end
 
-        # backwards compatibility shim, see https://github.com/bundler/bundler/issues/5102
+        # backwards compatibility shim, see https://github.com/rubygems/bundler/issues/5102
         kernel_class.send(:public, :gem) if Bundler.feature_flag.setup_makes_kernel_gem_public?
       end
     end
@@ -447,35 +443,6 @@ module Bundler
       Gem.clear_paths
     end
 
-    # This backports base_dir which replaces installation path
-    # RubyGems 1.8+
-    def backport_base_dir
-      redefine_method(Gem::Specification, :base_dir) do
-        return Gem.dir unless loaded_from
-        File.dirname File.dirname loaded_from
-      end
-    end
-
-    def backport_cache_file
-      redefine_method(Gem::Specification, :cache_dir) do
-        @cache_dir ||= File.join base_dir, "cache"
-      end
-
-      redefine_method(Gem::Specification, :cache_file) do
-        @cache_file ||= File.join cache_dir, "#{full_name}.gem"
-      end
-    end
-
-    def backport_spec_file
-      redefine_method(Gem::Specification, :spec_dir) do
-        @spec_dir ||= File.join base_dir, "specifications"
-      end
-
-      redefine_method(Gem::Specification, :spec_file) do
-        @spec_file ||= File.join spec_dir, "#{full_name}.gemspec"
-      end
-    end
-
     def undo_replacements
       @replaced_methods.each do |(sym, klass), method|
         redefine_method(klass, sym, method)
@@ -531,8 +498,16 @@ module Bundler
       end
     end
 
-    def fetch_specs(source, remote, name)
-      path = source + "#{name}.#{Gem.marshal_version}.gz"
+    def plain_specs
+      Gem::Specification._all
+    end
+
+    def plain_specs=(specs)
+      Gem::Specification.all = specs
+    end
+
+    def fetch_specs(remote, name)
+      path = remote.uri.to_s + "#{name}.#{Gem.marshal_version}.gz"
       fetcher = gem_remote_fetcher
       fetcher.headers = { "X-Gemfile-Source" => remote.original_uri.to_s } if remote.original_uri
       string = fetcher.fetch_path(path)
@@ -543,10 +518,8 @@ module Bundler
     end
 
     def fetch_all_remote_specs(remote)
-      source = remote.uri.is_a?(URI) ? remote.uri : URI.parse(source.to_s)
-
-      specs = fetch_specs(source, remote, "specs")
-      pres = fetch_specs(source, remote, "prerelease_specs") || []
+      specs = fetch_specs(remote, "specs")
+      pres = fetch_specs(remote, "prerelease_specs") || []
 
       specs.concat(pres)
     end
@@ -564,7 +537,7 @@ module Bundler
       require "resolv"
       proxy = configuration[:http_proxy]
       dns = Resolv::DNS.new
-      Bundler::GemRemoteFetcher.new(proxy, dns)
+      Gem::RemoteFetcher.new(proxy, dns)
     end
 
     def gem_from_path(path, policy = nil)
@@ -635,7 +608,6 @@ module Bundler
       ENV["BUNDLE_GEMFILE"] ||= File.expand_path(gemfile)
       require_relative "gemdeps"
       runtime = Bundler.setup
-      Bundler.ui = nil
       activated_spec_names = runtime.requested_specs.map(&:to_spec).sort_by(&:name)
       [Gemdeps.new(runtime), activated_spec_names]
     end
